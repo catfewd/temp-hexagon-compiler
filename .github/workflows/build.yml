@@ -11,33 +11,43 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential curl wget git unzip python3
-        
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3
+      
       - name: Cache Hexagon SDK
         id: cache-sdk
         uses: actions/cache@v4
         with:
           path: ~/hexagon-sdk
-          key: hexagon-sdk-6.6.0.0-v2
+          key: hexagon-sdk-6.6.0.0-v3
       
       - name: Download Hexagon SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          echo "Downloading Hexagon SDK (first time only)..."
           wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O hexagon-sdk.zip
           unzip -q hexagon-sdk.zip -d ~/hexagon-sdk
-          echo "SDK cached for future runs"
+      
+      - name: Debug SDK structure
+        run: |
+          echo "=== ~/hexagon-sdk contents ==="
+          ls -la ~/hexagon-sdk/
+          echo "=== Searching for setup_sdk_env.source ==="
+          find ~/hexagon-sdk -name "setup_sdk_env.source" 2>/dev/null
+          echo "=== All directories maxdepth 3 ==="
+          find ~/hexagon-sdk -maxdepth 3 -type d 2>/dev/null
       
       - name: Setup SDK
         run: |
-          SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 2 -type f -name "setup_sdk_env.source" -exec dirname {} \; | head -1)
+          SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 3 -type f -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
+          if [ -z "$SDK_ROOT" ]; then
+            echo "SDK root not found, trying alternative..."
+            SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 2 -type d | grep -i "6\." | head -1)
+          fi
+          echo "SDK_ROOT=$SDK_ROOT"
           echo "HEXAGON_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
-          echo "SDK: $SDK_ROOT"
       
       - name: Build libhtp_ops_skel.so
         run: |
+          echo "HEXAGON_SDK_ROOT=$HEXAGON_SDK_ROOT"
           source $HEXAGON_SDK_ROOT/setup_sdk_env.source
           export PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin:$PATH
           export LD_LIBRARY_PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/lib:$LD_LIBRARY_PATH
@@ -53,6 +63,7 @@ jobs:
             [ -f "$f" ] && SRCS="$SRCS $f"
           done
           
+          echo "=== Compiling ==="
           clang -target hexagon-unknown-elf -march=hexagonv75 -shared -fPIC -mhmx \
             -o $GITHUB_WORKSPACE/libhtp_ops_skel.so $SRCS \
             -Iinclude -I$HEXAGON_SDK_ROOT/incs -I$HEXAGON_SDK_ROOT/incs/stddef -I$HEXAGON_SDK_ROOT/rtos/qurt \
