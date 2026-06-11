@@ -17,19 +17,29 @@ jobs:
         
       - name: Download Hexagon SDK
         run: |
-          wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O hexagon-sdk.zip || \
-          wget -q "https://developer.qualcomm.com/download/hexagon-sdk/6.6.0.0" -O hexagon-sdk.zip
+          echo "Downloading Hexagon SDK..."
+          wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O hexagon-sdk.zip
+          echo "Download complete. File size:"
+          ls -lh hexagon-sdk.zip
+          echo "Unzipping..."
           unzip -q hexagon-sdk.zip -d ~/hexagon-sdk
-          ls ~/hexagon-sdk/
-          find ~/hexagon-sdk -maxdepth 2 -type d
-          echo "HEXAGON_SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 1 -type d -name '6.*' | head -1)" >> $GITHUB_ENV
+          echo "Contents of hexagon-sdk:"
+          ls -la ~/hexagon-sdk/
+          echo "Looking for SDK root..."
+          SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 2 -type f -name "setup_sdk_env.source" -exec dirname {} \; | head -1)
+          echo "Found SDK root: $SDK_ROOT"
+          echo "HEXAGON_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
       
-      - name: Setup Hexagon SDK
+      - name: Verify SDK installation
         run: |
           echo "HEXAGON_SDK_ROOT=$HEXAGON_SDK_ROOT"
-          source $HEXAGON_SDK_ROOT/setup_sdk_env.source
-          ls $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/ | head -20
-          file $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/clang-19
+          ls -la $HEXAGON_SDK_ROOT/
+          echo "Hexagon Tools:"
+          ls $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/ 2>/dev/null | head -20 || echo "Tools not found at expected path"
+          echo "Searching for clang-19..."
+          find $HEXAGON_SDK_ROOT -name "clang-19" -type f 2>/dev/null | head -5
+          echo "File type of clang-19:"
+          file $(find $HEXAGON_SDK_ROOT -name "clang-19" -type f 2>/dev/null | head -1) 2>/dev/null || echo "clang-19 not found"
       
       - name: Build htp-ops-lib DSP binary
         run: |
@@ -43,7 +53,6 @@ jobs:
           
           HEXLIB=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/target/hexagon/lib
           
-          # Compile all DSP sources
           SRCS=""
           for f in src/dsp/*.c src/dsp/*.cc src/dsp/ops/*.c; do
             if [ -f "$f" ]; then
