@@ -18,7 +18,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/hexagon-sdk.zip
-          key: hexagon-sdk-zip-v1
+          key: hexagon-sdk-zip-v2
       
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
@@ -32,8 +32,6 @@ jobs:
           if [ ! -d "/opt/hexagon-sdk/Hexagon_SDK" ]; then
             echo "Extracting SDK..."
             unzip -q /tmp/hexagon-sdk.zip -d /opt/hexagon-sdk
-          else
-            echo "SDK already extracted"
           fi
           ls /opt/hexagon-sdk/
       
@@ -44,28 +42,50 @@ jobs:
           echo "Found: $SDK_ROOT"
           echo "path=$SDK_ROOT" >> $GITHUB_OUTPUT
       
-      - name: Build libhtp_ops_skel.so via SDK cmake
+      - name: Build libhtp_ops_skel.so
         env:
           HEXAGON_SDK_ROOT: ${{ steps.sdk-root.outputs.path }}
         run: |
-          source $HEXAGON_SDK_ROOT/setup_sdk_env.source
+          SDK=$HEXAGON_SDK_ROOT
+          TOOLS=$SDK/tools/HEXAGON_Tools/19.0.07
+          HEXLIB=$TOOLS/Tools/target/hexagon/lib
+          CMAKE_ROOT=/usr
+          
+          echo "SDK=$SDK"
+          echo "TOOLS=$TOOLS"
+          echo "Compiler: $(ls $TOOLS/Tools/bin/hexagon-clang*)"
+          file $TOOLS/Tools/bin/hexagon-clang
           
           cd $GITHUB_WORKSPACE
           git clone https://github.com/haozixu/htp-ops-lib.git
+          cd htp-ops-lib
           
-          cd $HEXAGON_SDK_ROOT/build/cmake
-          bash cmake_configure.bash $GITHUB_WORKSPACE/htp-ops-lib hexagon DSP_ARCH=v75 BUILD=Release
+          cmake -S . -B build_hex \
+            -DCMAKE_TOOLCHAIN_FILE=$SDK/build/cmake/hexagon_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_MAKE_PROGRAM=$(which ninja) \
+            -GNinja \
+            -DHEXAGON_SDK_ROOT=$SDK \
+            -DHEXAGON_CMAKE_ROOT=$SDK/build/cmake \
+            -DHEXAGON_TOOLS_ROOT=$TOOLS \
+            -DDSP_VERSION=v75 \
+            -DQURT_OS=1 \
+            -DV=hexagon_toolv19_v75 \
+            -DPREBUILT_LIB_DIR=hexagon_toolv19_v75 \
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(pwd)/build_hex/ship \
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(pwd)/build_hex/ship \
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(pwd)/build_hex/ship
           
-          echo "=== Build output ==="
-          find $GITHUB_WORKSPACE/htp-ops-lib -name "*.so" -o -name "*.o" 2>/dev/null
-          ls -la $GITHUB_WORKSPACE/htp-ops-lib/hexagon_toolv19_v75/ship/ 2>/dev/null
-          ls -la $GITHUB_WORKSPACE/htp-ops-lib/hexagon_toolv19_v75/ 2>/dev/null
-          find $GITHUB_WORKSPACE/htp-ops-lib -name "libhtp_ops_skel*" 2>/dev/null
+          cmake --build build_hex -j$(nproc)
+          
+          echo "=== Build results ==="
+          find build_hex -name "*.so" 2>/dev/null
+          ls -la build_hex/ship/ 2>/dev/null
       
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: libhtp_ops_skel
           path: |
-            ${{ github.workspace }}/htp-ops-lib/**/libhtp_ops_skel.so
-            ${{ github.workspace }}/htp-ops-lib/**/libhtp_ops_skel.*
+            ${{ github.workspace }}/htp-ops-lib/build_hex/ship/*.so
+            ${{ github.workspace }}/htp-ops-lib/build_hex/ship/*.map
