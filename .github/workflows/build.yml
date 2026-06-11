@@ -13,13 +13,12 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
       
-      - name: Cache SDK zip
+      - name: Restore SDK cache
         id: cache-sdk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/hexagon-sdk.zip
           key: hexagon-sdk-6.6.0.0
-          save-always: true
       
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
@@ -27,6 +26,13 @@ jobs:
           echo "Downloading Hexagon SDK..."
           wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O /tmp/hexagon-sdk.zip
           echo "Downloaded: $(ls -lh /tmp/hexagon-sdk.zip)"
+      
+      - name: Save SDK cache
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/hexagon-sdk.zip
+          key: hexagon-sdk-6.6.0.0
       
       - name: Extract SDK
         run: |
@@ -37,13 +43,13 @@ jobs:
           SDK=$(find /opt/hexagon-sdk -maxdepth 3 -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
           echo "SDK=$SDK"
           
-          # Fix QAIC: replace Termux wrapper with real Ubuntu binary
-          chmod +x $SDK/ipc/fastrpc/qaic/Ubuntu/qaic
+          # Fix QAIC: cmake references bin/qaic but only Ubuntu/qaic exists
+          ls -la $SDK/ipc/fastrpc/qaic/
+          ls -la $SDK/ipc/fastrpc/qaic/Ubuntu/ 2>/dev/null
+          mkdir -p $SDK/ipc/fastrpc/qaic/bin
           cp $SDK/ipc/fastrpc/qaic/Ubuntu/qaic $SDK/ipc/fastrpc/qaic/bin/qaic
-          
-          echo "QAIC check:"
+          chmod +x $SDK/ipc/fastrpc/qaic/bin/qaic
           file $SDK/ipc/fastrpc/qaic/bin/qaic
-          $SDK/ipc/fastrpc/qaic/bin/qaic --help 2>&1 | head -3 || true
       
       - name: Find SDK root
         id: sdk-root
