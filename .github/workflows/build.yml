@@ -1,45 +1,83 @@
-name: Build Hexagon Toolchain
+name: Build libhtp_ops_skel.so
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-clang:
+  build-skel:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          sdk-tools: 'cmake,ndk'
-      
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential curl wget git unzip
+          sudo apt-get install -y build-essential curl wget git unzip python3
         
       - name: Download Hexagon SDK
         run: |
-          wget https://developer.qualcomm.com/download/hexagon-sdk/6.6.0.0 -O hexagon-sdk.zip
-          unzip hexagon-sdk.zip -d ~/hexagon-sdk
-          export HEXAGON_SDK_ROOT=~/hexagon-sdk/6.6.0.0
-          echo "HEXAGON_SDK_ROOT=$HEXAGON_SDK_ROOT" >> $GITHUB_ENV
+          wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O hexagon-sdk.zip || \
+          wget -q "https://developer.qualcomm.com/download/hexagon-sdk/6.6.0.0" -O hexagon-sdk.zip
+          unzip -q hexagon-sdk.zip -d ~/hexagon-sdk
+          ls ~/hexagon-sdk/
+          find ~/hexagon-sdk -maxdepth 2 -type d
+          echo "HEXAGON_SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 1 -type d -name '6.*' | head -1)" >> $GITHUB_ENV
       
-      - name: Build Hexagon Toolchain
+      - name: Setup Hexagon SDK
+        run: |
+          echo "HEXAGON_SDK_ROOT=$HEXAGON_SDK_ROOT"
+          source $HEXAGON_SDK_ROOT/setup_sdk_env.source
+          ls $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/ | head -20
+          file $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/clang-19
+      
+      - name: Build htp-ops-lib DSP binary
         run: |
           source $HEXAGON_SDK_ROOT/setup_sdk_env.source
-          cd $HEXAGON_SDK_ROOT
-          bash build/cmake/Ubuntu/build_cmake hexagon DSP_ARCH=v75
+          export PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin:$PATH
+          export LD_LIBRARY_PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/lib:$LD_LIBRARY_PATH
+          
+          cd $GITHUB_WORKSPACE
+          git clone https://github.com/haozixu/htp-ops-lib.git
+          cd htp-ops-lib
+          
+          HEXLIB=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/target/hexagon/lib
+          
+          # Compile all DSP sources
+          SRCS=""
+          for f in src/dsp/*.c src/dsp/*.cc src/dsp/ops/*.c; do
+            if [ -f "$f" ]; then
+              SRCS="$SRCS $f"
+              echo "  Source: $f"
+            fi
+          done
+          
+          echo "=== Compiling libhtp_ops_skel.so ==="
+          clang \
+            -target hexagon-unknown-elf \
+            -march=hexagonv75 \
+            -shared \
+            -fPIC \
+            -mhmx \
+            -o $GITHUB_WORKSPACE/libhtp_ops_skel.so \
+            $SRCS \
+            -Iinclude \
+            -I$HEXAGON_SDK_ROOT/incs \
+            -I$HEXAGON_SDK_ROOT/incs/stddef \
+            -I$HEXAGON_SDK_ROOT/rtos/qurt \
+            -fuse-ld=lld \
+            -nostdlib \
+            -Wl,$HEXLIB/v75/G0/pic/initS.o \
+            -L$HEXLIB/v75/G0/pic \
+            -lgcc \
+            -Wl,$HEXLIB/v75/G0/pic/finiS.o
+          
+          echo "=== Build complete ==="
+          file $GITHUB_WORKSPACE/libhtp_ops_skel.so
+          ls -la $GITHUB_WORKSPACE/libhtp_ops_skel.so
       
-      - name: Upload artifacts
+      - name: Upload libhtp_ops_skel.so
         uses: actions/upload-artifact@v4
         with:
-          name: hexagon-toolchain
-          path: |
-            ${{ env.HEXAGON_SDK_ROOT }}/tools/HEXAGON_Tools/19.0.07/Tools/bin/hexagon-clang
-            ${{ env.HEXAGON_SDK_ROOT }}/tools/HEXAGON_Tools/19.0.07/Tools/bin/hexagon-clang++
-            ${{ env.HEXAGON_SDK_ROOT }}/tools/HEXAGON_Tools/19.0.07/Tools/bin/clang-19
-            ${{ env.HEXAGON_SDK_ROOT }}/tools/HEXAGON_Tools/19.0.07/Tools/bin/lld
-            ${{ env.HEXAGON_SDK_ROOT }}/tools/HEXAGON_Tools/19.0.07/Tools/bin/ld.lld
+          name: libhtp_ops_skel
+          path: ${{ github.workspace }}/libhtp_ops_skel.so
