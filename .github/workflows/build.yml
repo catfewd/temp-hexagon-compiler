@@ -15,33 +15,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl wget git unzip python3
         
+      - name: Cache Hexagon SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ~/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-v2
+      
       - name: Download Hexagon SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          echo "Downloading Hexagon SDK..."
+          echo "Downloading Hexagon SDK (first time only)..."
           wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O hexagon-sdk.zip
-          echo "Download complete. File size:"
-          ls -lh hexagon-sdk.zip
-          echo "Unzipping..."
           unzip -q hexagon-sdk.zip -d ~/hexagon-sdk
-          echo "Contents of hexagon-sdk:"
-          ls -la ~/hexagon-sdk/
-          echo "Looking for SDK root..."
-          SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 2 -type f -name "setup_sdk_env.source" -exec dirname {} \; | head -1)
-          echo "Found SDK root: $SDK_ROOT"
-          echo "HEXAGON_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+          echo "SDK cached for future runs"
       
-      - name: Verify SDK installation
+      - name: Setup SDK
         run: |
-          echo "HEXAGON_SDK_ROOT=$HEXAGON_SDK_ROOT"
-          ls -la $HEXAGON_SDK_ROOT/
-          echo "Hexagon Tools:"
-          ls $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/ 2>/dev/null | head -20 || echo "Tools not found at expected path"
-          echo "Searching for clang-19..."
-          find $HEXAGON_SDK_ROOT -name "clang-19" -type f 2>/dev/null | head -5
-          echo "File type of clang-19:"
-          file $(find $HEXAGON_SDK_ROOT -name "clang-19" -type f 2>/dev/null | head -1) 2>/dev/null || echo "clang-19 not found"
+          SDK_ROOT=$(find ~/hexagon-sdk -maxdepth 2 -type f -name "setup_sdk_env.source" -exec dirname {} \; | head -1)
+          echo "HEXAGON_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+          echo "SDK: $SDK_ROOT"
       
-      - name: Build htp-ops-lib DSP binary
+      - name: Build libhtp_ops_skel.so
         run: |
           source $HEXAGON_SDK_ROOT/setup_sdk_env.source
           export PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin:$PATH
@@ -55,33 +50,15 @@ jobs:
           
           SRCS=""
           for f in src/dsp/*.c src/dsp/*.cc src/dsp/ops/*.c; do
-            if [ -f "$f" ]; then
-              SRCS="$SRCS $f"
-              echo "  Source: $f"
-            fi
+            [ -f "$f" ] && SRCS="$SRCS $f"
           done
           
-          echo "=== Compiling libhtp_ops_skel.so ==="
-          clang \
-            -target hexagon-unknown-elf \
-            -march=hexagonv75 \
-            -shared \
-            -fPIC \
-            -mhmx \
-            -o $GITHUB_WORKSPACE/libhtp_ops_skel.so \
-            $SRCS \
-            -Iinclude \
-            -I$HEXAGON_SDK_ROOT/incs \
-            -I$HEXAGON_SDK_ROOT/incs/stddef \
-            -I$HEXAGON_SDK_ROOT/rtos/qurt \
-            -fuse-ld=lld \
-            -nostdlib \
-            -Wl,$HEXLIB/v75/G0/pic/initS.o \
-            -L$HEXLIB/v75/G0/pic \
-            -lgcc \
-            -Wl,$HEXLIB/v75/G0/pic/finiS.o
+          clang -target hexagon-unknown-elf -march=hexagonv75 -shared -fPIC -mhmx \
+            -o $GITHUB_WORKSPACE/libhtp_ops_skel.so $SRCS \
+            -Iinclude -I$HEXAGON_SDK_ROOT/incs -I$HEXAGON_SDK_ROOT/incs/stddef -I$HEXAGON_SDK_ROOT/rtos/qurt \
+            -fuse-ld=lld -nostdlib \
+            -Wl,$HEXLIB/v75/G0/pic/initS.o -L$HEXLIB/v75/G0/pic -lgcc -Wl,$HEXLIB/v75/G0/pic/finiS.o
           
-          echo "=== Build complete ==="
           file $GITHUB_WORKSPACE/libhtp_ops_skel.so
           ls -la $GITHUB_WORKSPACE/libhtp_ops_skel.so
       
