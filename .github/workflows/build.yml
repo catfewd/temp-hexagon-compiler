@@ -19,6 +19,7 @@ jobs:
         with:
           path: /tmp/hexagon-sdk.zip
           key: hexagon-sdk-6.6.0.0
+          save-always: true
       
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
