@@ -11,14 +11,14 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
       
       - name: Cache SDK zip
         id: cache-sdk
         uses: actions/cache@v4
         with:
           path: /tmp/hexagon-sdk.zip
-          key: hexagon-sdk-zip-6.6.0.0
+          key: hexagon-sdk-zip-v1
       
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
@@ -32,11 +32,10 @@ jobs:
           if [ ! -d "/opt/hexagon-sdk/Hexagon_SDK" ]; then
             echo "Extracting SDK..."
             unzip -q /tmp/hexagon-sdk.zip -d /opt/hexagon-sdk
-            echo "Extracted. Contents:"
-            ls /opt/hexagon-sdk/
           else
             echo "SDK already extracted"
           fi
+          ls /opt/hexagon-sdk/
       
       - name: Find SDK root
         id: sdk-root
@@ -45,39 +44,28 @@ jobs:
           echo "Found: $SDK_ROOT"
           echo "path=$SDK_ROOT" >> $GITHUB_OUTPUT
       
-      - name: Build libhtp_ops_skel.so
+      - name: Build libhtp_ops_skel.so via SDK cmake
         env:
           HEXAGON_SDK_ROOT: ${{ steps.sdk-root.outputs.path }}
         run: |
           source $HEXAGON_SDK_ROOT/setup_sdk_env.source
-          export PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin:$PATH
-          export LD_LIBRARY_PATH=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/lib:$LD_LIBRARY_PATH
           
           cd $GITHUB_WORKSPACE
           git clone https://github.com/haozixu/htp-ops-lib.git
-          cd htp-ops-lib
           
-          HEXLIB=$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/target/hexagon/lib
+          cd $HEXAGON_SDK_ROOT/build/cmake
+          bash cmake_configure.bash $GITHUB_WORKSPACE/htp-ops-lib hexagon DSP_ARCH=v75 BUILD=Release
           
-          SRCS=""
-          for f in src/dsp/*.c src/dsp/*.cc src/dsp/ops/*.c; do
-            [ -f "$f" ] && SRCS="$SRCS $f"
-          done
-          
-          which clang
-          clang --version
-          
-          clang -target hexagon-unknown-elf -march=hexagonv75 -shared -fPIC -mhmx \
-            -o $GITHUB_WORKSPACE/libhtp_ops_skel.so $SRCS \
-            -Iinclude -I$HEXAGON_SDK_ROOT/incs -I$HEXAGON_SDK_ROOT/incs/stddef -I$HEXAGON_SDK_ROOT/rtos/qurt \
-            -fuse-ld=lld -nostdlib \
-            -Wl,$HEXLIB/v75/G0/pic/initS.o -L$HEXLIB/v75/G0/pic -lgcc -Wl,$HEXLIB/v75/G0/pic/finiS.o
-          
-          file $GITHUB_WORKSPACE/libhtp_ops_skel.so
-          ls -la $GITHUB_WORKSPACE/libhtp_ops_skel.so
+          echo "=== Build output ==="
+          find $GITHUB_WORKSPACE/htp-ops-lib -name "*.so" -o -name "*.o" 2>/dev/null
+          ls -la $GITHUB_WORKSPACE/htp-ops-lib/hexagon_toolv19_v75/ship/ 2>/dev/null
+          ls -la $GITHUB_WORKSPACE/htp-ops-lib/hexagon_toolv19_v75/ 2>/dev/null
+          find $GITHUB_WORKSPACE/htp-ops-lib -name "libhtp_ops_skel*" 2>/dev/null
       
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: libhtp_ops_skel
-          path: ${{ github.workspace }}/libhtp_ops_skel.so
+          path: |
+            ${{ github.workspace }}/htp-ops-lib/**/libhtp_ops_skel.so
+            ${{ github.workspace }}/htp-ops-lib/**/libhtp_ops_skel.*
