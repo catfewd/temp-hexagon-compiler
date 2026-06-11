@@ -18,7 +18,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/hexagon-sdk.zip
-          key: hexagon-sdk-zip-v2
+          key: hexagon-sdk-6.6.0.0
       
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
@@ -33,13 +33,21 @@ jobs:
             echo "Extracting SDK..."
             unzip -q /tmp/hexagon-sdk.zip -d /opt/hexagon-sdk
           fi
-          ls /opt/hexagon-sdk/
+          SDK=$(find /opt/hexagon-sdk -maxdepth 3 -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
+          echo "SDK=$SDK"
+          
+          # Fix QAIC: replace Termux wrapper with real Ubuntu binary
+          chmod +x $SDK/ipc/fastrpc/qaic/Ubuntu/qaic
+          cp $SDK/ipc/fastrpc/qaic/Ubuntu/qaic $SDK/ipc/fastrpc/qaic/bin/qaic
+          
+          echo "QAIC check:"
+          file $SDK/ipc/fastrpc/qaic/bin/qaic
+          $SDK/ipc/fastrpc/qaic/bin/qaic --help 2>&1 | head -3 || true
       
       - name: Find SDK root
         id: sdk-root
         run: |
           SDK_ROOT=$(find /opt/hexagon-sdk -maxdepth 3 -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
-          echo "Found: $SDK_ROOT"
           echo "path=$SDK_ROOT" >> $GITHUB_OUTPUT
       
       - name: Build libhtp_ops_skel.so
@@ -48,13 +56,6 @@ jobs:
         run: |
           SDK=$HEXAGON_SDK_ROOT
           TOOLS=$SDK/tools/HEXAGON_Tools/19.0.07
-          HEXLIB=$TOOLS/Tools/target/hexagon/lib
-          CMAKE_ROOT=/usr
-          
-          echo "SDK=$SDK"
-          echo "TOOLS=$TOOLS"
-          echo "Compiler: $(ls $TOOLS/Tools/bin/hexagon-clang*)"
-          file $TOOLS/Tools/bin/hexagon-clang
           
           cd $GITHUB_WORKSPACE
           git clone https://github.com/haozixu/htp-ops-lib.git
