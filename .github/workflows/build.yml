@@ -1,0 +1,41 @@
+name: Build Hexagon Toolchain
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-clang:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          sdk-tools: 'cmake,ndk'
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget git unzip
+        
+      - name: Download Hexagon SDK
+        run: |
+          wget https://developer.qualcomm.com/download/hexagon-sdk/6.6.0.0 -O hexagon-sdk.zip
+          unzip hexagon-sdk.zip -d ~/hexagon-sdk
+          export HEXAGON_SDK_ROOT=~/hexagon-sdk/6.6.0.0
+          echo "HEXAGON_SDK_ROOT=$HEXAGON_SDK_ROOT" >> $GITHUB_ENV
+      
+      - name: Build Hexagon Toolchain
+        run: |
+          source $HEXAGON_SDK_ROOT/setup_sdk_env.source
+          cd $HEXAGON_SDK_ROOT
+          bash build/cmake/Ubuntu/build_cmake hexagon DSP_ARCH=v75
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexagon-toolchain
+          path: $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/hexagon-clang
+          path: $HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/19.0.07/Tools/bin/hexagon-clang++
