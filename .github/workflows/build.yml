@@ -176,6 +176,13 @@ jobs:
 
           cd $GITHUB_WORKSPACE/htp-ops-lib
 
+          DSPRPC_LIB=$SDK/lib/fastrpc/dsprpc/Android/aarch64/libcdsprpc.so
+          if [ ! -f "$DSPRPC_LIB" ]; then
+            echo "WARNING: $DSPRPC_LIB not found, searching..."
+            DSPRPC_LIB=$(find $SDK/lib -name "libcdsprpc.so" 2>/dev/null | head -1)
+            echo "Found: $DSPRPC_LIB"
+          fi
+
           cmake -S . -B build_android \
             -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -190,9 +197,10 @@ jobs:
             -DPREBUILT_LIB_DIR=hexagon_toolv19_v75 \
             -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(pwd)/build_android/ship \
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(pwd)/build_android/ship \
-            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(pwd)/build_android/ship
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(pwd)/build_android/ship \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L$(dirname $DSPRPC_LIB) -lcdsprpc"
 
-          cmake --build build_android -j$(nproc)
+          cmake --build build_android -j$(nproc) 2>&1 | tail -20
 
           echo "=== Build results ==="
           find build_android -name "*.so" 2>/dev/null
