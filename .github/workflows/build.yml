@@ -200,7 +200,7 @@ jobs:
             -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(pwd)/build_android/ship \
             -DCMAKE_SHARED_LINKER_FLAGS="-L$(dirname $DSPRPC_LIB) -lcdsprpc"
 
-          cmake --build build_android -j$(nproc) 2>&1 | tail -20
+          cmake --build build_android -j$(nproc)
 
           echo "=== Build results ==="
           find build_android -name "*.so" 2>/dev/null
