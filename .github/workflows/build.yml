@@ -184,6 +184,7 @@ jobs:
             -DCMAKE_MAKE_PROGRAM=$(which ninja) \
             -GNinja \
             -DOS_TYPE=HLOS \
+            -DDSP_TYPE=CDSP \
             -DHEXAGON_SDK_ROOT=$SDK \
             -DHEXAGON_CMAKE_ROOT=$SDK/build/cmake \
             -DPREBUILT_LIB_DIR=hexagon_toolv19_v75 \
