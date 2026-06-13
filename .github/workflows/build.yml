@@ -13,12 +13,12 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
 
-      - name: Restore SDK cache
+      - name: Cache Hexagon SDK
         id: cache-sdk
         uses: actions/cache/restore@v4
         with:
-          path: /tmp/hexagon-sdk.zip
-          key: hexagon-sdk-6.6.0.0
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
 
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
@@ -26,24 +26,19 @@ jobs:
           echo "Downloading Hexagon SDK..."
           wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O /tmp/hexagon-sdk.zip
           echo "Downloaded: $(ls -lh /tmp/hexagon-sdk.zip)"
+          echo "Extracting SDK..."
+          unzip -q /tmp/hexagon-sdk.zip -d /opt
 
       - name: Save SDK cache
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: /tmp/hexagon-sdk.zip
-          key: hexagon-sdk-6.6.0.0
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
 
-      - name: Extract SDK
+      - name: Fix QAIC
         run: |
-          if [ ! -d "/opt/hexagon-sdk/Hexagon_SDK" ]; then
-            echo "Extracting SDK..."
-            unzip -q /tmp/hexagon-sdk.zip -d /opt/hexagon-sdk
-          fi
           SDK=$(find /opt/hexagon-sdk -maxdepth 3 -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
-          echo "SDK=$SDK"
-
-          # Fix QAIC: cmake references bin/qaic but only Ubuntu/qaic exists
           mkdir -p $SDK/ipc/fastrpc/qaic/bin
           cp $SDK/ipc/fastrpc/qaic/Ubuntu/qaic $SDK/ipc/fastrpc/qaic/bin/qaic
           chmod +x $SDK/ipc/fastrpc/qaic/bin/qaic
@@ -102,14 +97,14 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
 
-      - name: Cache Extracted NDK
+      - name: Cache NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /opt/android-ndk-r28
-          key: ndk-r28-extracted-1
+          key: android-ndk-r28-extracted
 
-      - name: Download and Extract NDK
+      - name: Download and extract NDK r28
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
           echo "Downloading Android NDK r28..."
@@ -117,48 +112,57 @@ jobs:
           echo "Downloaded: $(ls -lh /tmp/android-ndk-r28.zip)"
           echo "Extracting NDK..."
           unzip -q /tmp/android-ndk-r28.zip -d /opt
-        with:
-          path: /tmp/android-ndk-r28.zip
-          key: android-ndk-r28-1
+          if [ -d "/opt/android-ndk-r28" ]; then
+            echo "NDK extracted to /opt/android-ndk-r28"
+          else
+            EXTRACTED=$(ls -d /opt/android-ndk-* 2>/dev/null | head -1)
+            if [ -n "$EXTRACTED" ]; then
+              mv "$EXTRACTED" /opt/android-ndk-r28
+            fi
+          fi
 
-      - name: Restore SDK cache
+      - name: Save NDK cache
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/android-ndk-r28
+          key: android-ndk-r28-extracted
+
+      - name: Cache SDK
         id: cache-sdk
         uses: actions/cache/restore@v4
         with:
-          path: /tmp/hexagon-sdk.zip
-          key: hexagon-sdk-6.6.0.0
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
 
-      - name: Extract NDK
+      - name: Download SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          if [ ! -d "/opt/android-ndk-r28" ]; then
-            echo "Extracting NDK..."
-            unzip -q /tmp/android-ndk-r28.zip -d /opt
-            # The zip extracts to android-ndk-r28/ by default
-            if [ -d "/opt/android-ndk-r28" ]; then
-              echo "NDK extracted to /opt/android-ndk-r28"
-            else
-              EXTRACTED=$(ls -d /opt/android-ndk-* 2>/dev/null | head -1)
-              if [ -n "$EXTRACTED" ]; then
-                mv "$EXTRACTED" /opt/android-ndk-r28
-              fi
-            fi
-          fi
-          echo "NDK=/opt/android-ndk-r28" >> $GITHUB_ENV
+          echo "Downloading Hexagon SDK..."
+          wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O /tmp/hexagon-sdk.zip
+          echo "Downloaded: $(ls -lh /tmp/hexagon-sdk.zip)"
+          echo "Extracting SDK..."
+          unzip -q /tmp/hexagon-sdk.zip -d /opt
 
-      - name: Extract SDK
+      - name: Save SDK cache
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
+
+      - name: Fix QAIC
         run: |
-          if [ ! -d "/opt/hexagon-sdk/Hexagon_SDK" ]; then
-            echo "Extracting SDK..."
-            unzip -q /tmp/hexagon-sdk.zip -d /opt/hexagon-sdk
-          fi
           SDK=$(find /opt/hexagon-sdk -maxdepth 3 -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
-          echo "SDK=$SDK"
-          echo "HEXAGON_SDK_ROOT=$SDK" >> $GITHUB_ENV
-
-          # Fix QAIC
           mkdir -p $SDK/ipc/fastrpc/qaic/bin
           cp $SDK/ipc/fastrpc/qaic/Ubuntu/qaic $SDK/ipc/fastrpc/qaic/bin/qaic
           chmod +x $SDK/ipc/fastrpc/qaic/bin/qaic
+
+      - name: Set environment variables
+        run: |
+          echo "NDK=/opt/android-ndk-r28" >> $GITHUB_ENV
+          SDK=$(find /opt/hexagon-sdk -maxdepth 3 -name "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
+          echo "HEXAGON_SDK_ROOT=$SDK" >> $GITHUB_ENV
 
       - name: Checkout htp-ops-lib
         uses: actions/checkout@v4
@@ -169,8 +173,8 @@ jobs:
 
       - name: Build libhtp_ops.so (HLOS host stub)
         run: |
-          SDK=$HEXAGON_SDK_ROOT
           NDK=/opt/android-ndk-r28
+          SDK=$HEXAGON_SDK_ROOT
 
           cd $GITHUB_WORKSPACE/htp-ops-lib
 
