@@ -1,0 +1,246 @@
+name: Build libhtp_ops_skel.so + libhtp_ops.so
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-skel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
+
+      - name: Cache Hexagon SDK
+        id: cache-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
+
+      - name: Download and extract SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading Hexagon SDK..."
+          wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O /tmp/hexagon-sdk.zip
+          echo "Downloaded: $(ls -lh /tmp/hexagon-sdk.zip)"
+          echo "Extracting SDK..."
+          mkdir -p /tmp/hexagon-sdk-extract
+          unzip -q /tmp/hexagon-sdk.zip -d /tmp/hexagon-sdk-extract
+          echo "=== Top-level extracted contents ==="
+          ls -la /tmp/hexagon-sdk-extract
+
+          # Find the directory that actually contains setup_sdk_env.source,
+          # regardless of how deeply nested or how it's named/cased.
+          SDK_SRC=$(find /tmp/hexagon-sdk-extract -maxdepth 6 -iname "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
+          if [ -z "$SDK_SRC" ]; then
+            echo "::error::Could not locate setup_sdk_env.source in extracted SDK"
+            find /tmp/hexagon-sdk-extract -maxdepth 6 -type d
+            exit 1
+          fi
+          echo "Found SDK root at: $SDK_SRC"
+
+          # Normalize to a fixed, known path: /opt/hexagon-sdk
+          mkdir -p /opt/hexagon-sdk
+          # Move the *contents* of SDK_SRC into /opt/hexagon-sdk so that
+          # /opt/hexagon-sdk/setup_sdk_env.source exists directly.
+          mv "$SDK_SRC"/* /opt/hexagon-sdk/
+          mv "$SDK_SRC"/.[!.]* /opt/hexagon-sdk/ 2>/dev/null || true
+
+          echo "=== /opt/hexagon-sdk contents ==="
+          ls -la /opt/hexagon-sdk | head -30
+          test -f /opt/hexagon-sdk/setup_sdk_env.source && echo "OK: setup_sdk_env.source present" || { echo "::error::setup_sdk_env.source NOT found at /opt/hexagon-sdk"; exit 1; }
+
+      - name: Save SDK cache
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
+
+      - name: Fix QAIC
+        run: |
+          SDK=/opt/hexagon-sdk
+          test -f "$SDK/setup_sdk_env.source" || { echo "::error::$SDK/setup_sdk_env.source not found"; exit 1; }
+          mkdir -p "$SDK/ipc/fastrpc/qaic/bin"
+          cp "$SDK/ipc/fastrpc/qaic/Ubuntu/qaic" "$SDK/ipc/fastrpc/qaic/bin/qaic"
+          chmod +x "$SDK/ipc/fastrpc/qaic/bin/qaic"
+
+      - name: Build libhtp_ops_skel.so
+        env:
+          HEXAGON_SDK_ROOT: /opt/hexagon-sdk
+        run: |
+          SDK=$HEXAGON_SDK_ROOT
+          TOOLS=$SDK/tools/HEXAGON_Tools/19.0.07
+
+          cd $GITHUB_WORKSPACE
+          git clone --branch build-with-idl https://github.com/catfewd/htp-ops-lib.git
+          cd htp-ops-lib
+
+          cmake -S . -B build_hex \
+            -DCMAKE_TOOLCHAIN_FILE=$SDK/build/cmake/hexagon_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_MAKE_PROGRAM=$(which ninja) \
+            -GNinja \
+            -DHEXAGON_SDK_ROOT=$SDK \
+            -DHEXAGON_CMAKE_ROOT=$SDK/build/cmake \
+            -DHEXAGON_TOOLS_ROOT=$TOOLS \
+            -DDSP_VERSION=v75 \
+            -DQURT_OS=1 \
+            -DV=hexagon_toolv19_v75 \
+            -DPREBUILT_LIB_DIR=hexagon_toolv19_v75 \
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(pwd)/build_hex/ship \
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(pwd)/build_hex/ship \
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(pwd)/build_hex/ship
+
+          cmake --build build_hex -j$(nproc)
+
+          echo "=== Build results ==="
+          find build_hex -name "*.so" -o -name "*.map" 2>/dev/null
+          ls -la build_hex/ship/ 2>/dev/null
+
+      - name: Upload skel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libhtp_ops_skel
+          path: |
+            ${{ github.workspace }}/htp-ops-lib/build_hex/ship/*.so
+            ${{ github.workspace }}/htp-ops-lib/build_hex/ship/*.map
+
+  build-host-stub:
+    needs: [build-skel]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
+
+      - name: Cache NDK
+        id: cache-ndk
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/android-ndk-r28
+          key: android-ndk-r28-extracted
+
+      - name: Download and extract NDK r28
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading Android NDK r28..."
+          wget -q "https://dl.google.com/android/repository/android-ndk-r28-linux.zip" -O /tmp/android-ndk-r28.zip
+          echo "Downloaded: $(ls -lh /tmp/android-ndk-r28.zip)"
+          echo "Extracting NDK..."
+          unzip -q /tmp/android-ndk-r28.zip -d /opt
+          if [ -d "/opt/android-ndk-r28" ]; then
+            echo "NDK extracted to /opt/android-ndk-r28"
+          else
+            EXTRACTED=$(ls -d /opt/android-ndk-* 2>/dev/null | head -1)
+            if [ -n "$EXTRACTED" ]; then
+              mv "$EXTRACTED" /opt/android-ndk-r28
+            fi
+          fi
+
+      - name: Save NDK cache
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/android-ndk-r28
+          key: android-ndk-r28-extracted
+
+      - name: Cache SDK
+        id: cache-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
+
+      - name: Download and extract SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading Hexagon SDK..."
+          wget -q "https://softwarecenter.qualcomm.com/api/download/software/sdks/Hexagon_SDK/Linux/Debian/6.6.0.0/Hexagon_SDK_Linux.zip" -O /tmp/hexagon-sdk.zip
+          echo "Downloaded: $(ls -lh /tmp/hexagon-sdk.zip)"
+          echo "Extracting SDK..."
+          mkdir -p /tmp/hexagon-sdk-extract
+          unzip -q /tmp/hexagon-sdk.zip -d /tmp/hexagon-sdk-extract
+          echo "=== Top-level extracted contents ==="
+          ls -la /tmp/hexagon-sdk-extract
+
+          SDK_SRC=$(find /tmp/hexagon-sdk-extract -maxdepth 6 -iname "setup_sdk_env.source" -exec dirname {} \; 2>/dev/null | head -1)
+          if [ -z "$SDK_SRC" ]; then
+            echo "::error::Could not locate setup_sdk_env.source in extracted SDK"
+            find /tmp/hexagon-sdk-extract -maxdepth 6 -type d
+            exit 1
+          fi
+          echo "Found SDK root at: $SDK_SRC"
+
+          mkdir -p /opt/hexagon-sdk
+          mv "$SDK_SRC"/* /opt/hexagon-sdk/
+          mv "$SDK_SRC"/.[!.]* /opt/hexagon-sdk/ 2>/dev/null || true
+
+          echo "=== /opt/hexagon-sdk contents ==="
+          ls -la /opt/hexagon-sdk | head -30
+          test -f /opt/hexagon-sdk/setup_sdk_env.source && echo "OK: setup_sdk_env.source present" || { echo "::error::setup_sdk_env.source NOT found at /opt/hexagon-sdk"; exit 1; }
+
+      - name: Save SDK cache
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/hexagon-sdk
+          key: hexagon-sdk-6.6.0.0-extracted
+
+      - name: Fix QAIC
+        run: |
+          SDK=/opt/hexagon-sdk
+          test -f "$SDK/setup_sdk_env.source" || { echo "::error::$SDK/setup_sdk_env.source not found"; exit 1; }
+          mkdir -p "$SDK/ipc/fastrpc/qaic/bin"
+          cp "$SDK/ipc/fastrpc/qaic/Ubuntu/qaic" "$SDK/ipc/fastrpc/qaic/bin/qaic"
+          chmod +x "$SDK/ipc/fastrpc/qaic/bin/qaic"
+
+      - name: Set environment variables
+        run: |
+          echo "NDK=/opt/android-ndk-r28" >> $GITHUB_ENV
+          echo "HEXAGON_SDK_ROOT=/opt/hexagon-sdk" >> $GITHUB_ENV
+
+      - name: Checkout htp-ops-lib
+        uses: actions/checkout@v4
+        with:
+          repository: catfewd/htp-ops-lib
+          ref: build-with-idl
+          path: htp-ops-lib
+
+      - name: Build libhtp_ops.so (HLOS host stub)
+        run: |
+          NDK=/opt/android-ndk-r28
+          SDK=$HEXAGON_SDK_ROOT
+
+          cd $GITHUB_WORKSPACE/htp-ops-lib
+
+          cmake -S . -B build_android \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_MAKE_PROGRAM=$(which ninja) \
+            -GNinja \
+            -DOS_TYPE=HLOS \
+            -DDSP_TYPE=CDSP \
+            -DHEXAGON_SDK_ROOT=$SDK \
+            -DHEXAGON_CMAKE_ROOT=$SDK/build/cmake \
+            -DPREBUILT_LIB_DIR=android_aarch64 \
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(pwd)/build_android/ship \
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(pwd)/build_android/ship \
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(pwd)/build_android/ship
+
+          cmake --build build_android -j$(nproc)
+
+          echo "=== Build results ==="
+          find build_android -name "*.so" 2>/dev/null
+          ls -la build_android/ship/ 2>/dev/null
+
+      - name: Upload host stub artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libhtp_ops
+          path: |
+            ${{ github.workspace }}/htp-ops-lib/build_android/ship/*.so
