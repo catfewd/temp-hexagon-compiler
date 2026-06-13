@@ -102,23 +102,21 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential curl wget git unzip python3 lld cmake ninja-build
 
-      - name: Restore NDK cache
+      - name: Cache Extracted NDK
         id: cache-ndk
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
-          path: /tmp/android-ndk-r28.zip
-          key: android-ndk-r28-1
+          path: /opt/android-ndk-r28
+          key: ndk-r28-extracted-1
 
-      - name: Download NDK r28
+      - name: Download and Extract NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
           echo "Downloading Android NDK r28..."
           wget -q "https://dl.google.com/android/repository/android-ndk-r28-linux.zip" -O /tmp/android-ndk-r28.zip
           echo "Downloaded: $(ls -lh /tmp/android-ndk-r28.zip)"
-
-      - name: Save NDK cache
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+          echo "Extracting NDK..."
+          unzip -q /tmp/android-ndk-r28.zip -d /opt
         with:
           path: /tmp/android-ndk-r28.zip
           key: android-ndk-r28-1
