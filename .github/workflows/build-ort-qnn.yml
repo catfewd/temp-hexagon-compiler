@@ -1,0 +1,150 @@
+name: Build ORT with QNN EP for Android (HTP v75)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'ort-qnn-*' ]
+
+env:
+  ORT_COMMIT: 312f5249437a4f923a6b288902bd802532f7b159
+  NDK_VERSION: r27c
+  ANDROID_API: 24
+  QNN_HOME: /opt/qnn-sdk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout ORT source at pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/onnxruntime
+          ref: ${{ env.ORT_COMMIT }}
+          submodules: recursive
+          path: onnxruntime
+          fetch-depth: 1
+
+      - name: Cache QNN SDK
+        id: cache-qnn
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/qnn-sdk
+          key: qnn-sdk-2.46.0.260424-extracted
+
+      - name: Download and extract QNN SDK
+        if: steps.cache-qnn.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/qnn-sdk
+          curl -sL -o /tmp/qnn-sdk.tar.gz \
+            "https://github.com/catfewd/temp-hexagon-compiler/releases/download/qnn-sdk-2.46.0.260424/qnn-sdk-2.46.0.260424-min-aarch64.tar.gz"
+          tar xzf /tmp/qnn-sdk.tar.gz -C /opt/qnn-sdk
+          cp -r /opt/qnn-sdk/qnn-sdk-min/* /opt/qnn-sdk/
+          rm -rf /opt/qnn-sdk/qnn-sdk-min
+          echo "=== Verifying ==="
+          ls /opt/qnn-sdk/include/QNN/QnnInterface.h && echo "QNN SDK OK"
+
+      - name: Save QNN SDK cache
+        if: steps.cache-qnn.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/qnn-sdk
+          key: qnn-sdk-2.46.0.260424-extracted
+
+      - name: Verify QNN SDK
+        run: ls -la ${{ env.QNN_HOME }}/include/QNN/QnnInterface.h
+
+      - name: Install Android NDK ${{ env.NDK_VERSION }}
+        run: |
+          curl -sL -o ndk.zip \
+            "https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
+          unzip -q ndk.zip
+          echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-r27c" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$(pwd)/android-ndk-r27c" >> $GITHUB_ENV
+
+      - name: Set up Android SDK platform
+        run: |
+          SDK=/usr/local/lib/android/sdk
+          if [ -d "$SDK/platforms/android-27" ]; then
+            echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
+          else
+            mkdir -p $HOME/android-sdk
+            cd $HOME/android-sdk
+            curl -sL -o tools.zip \
+              "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            unzip -q tools.zip
+            yes 2>/dev/null | ./cmdline-tools/bin/sdkmanager "platforms;android-27" > /dev/null || true
+            echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+            cd -
+          fi
+
+      - name: Show versions
+        run: |
+          echo "ORT commit: ${{ env.ORT_COMMIT }}"
+          cat onnxruntime/VERSION_NUMBER 2>/dev/null || echo "no VERSION_NUMBER"
+          cd onnxruntime
+          git log --oneline -1
+          git describe --tags --always 2>/dev/null || true
+          cd ..
+
+      - name: Setup ccache
+        run: |
+          sudo apt-get install -y ccache
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          ccache --max-size 5G
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-qnn
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-
+            ccache-${{ runner.os }}-
+
+      - name: Build ORT for Android with QNN EP
+        timeout-minutes: 300
+        run: |
+          cd onnxruntime
+          export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache CCACHE_CPP2=yes
+          ./build.sh \
+            --build_shared_lib \
+            --android \
+            --config MinSizeRel \
+            --parallel 4 \
+            --use_qnn \
+            --qnn_home ${{ env.QNN_HOME }} \
+            --android_ndk_path ${{ env.ANDROID_NDK_HOME }} \
+            --android_sdk_path ${{ env.ANDROID_SDK_ROOT }} \
+            --android_abi arm64-v8a \
+            --android_api ${{ env.ANDROID_API }} \
+            --cmake_generator Ninja \
+            --build_dir build/Android \
+            --skip_tests \
+            --update --build
+
+      - name: List build artifacts
+        run: |
+          find onnxruntime/build/Android/MinSizeRel/ -maxdepth 1 -type f \( -name "*.so" -o -name "*.a" \) 2>/dev/null || echo "No .so/.a found"
+          find onnxruntime/build/Android/ -name "*.so" -o -name "*.a" 2>/dev/null
+
+      - name: Verify QNN EP symbols
+        if: success()
+        run: |
+          SO=onnxruntime/build/Android/MinSizeRel/libonnxruntime.so
+          ls -la $SO
+          echo "=== Size ==="
+          du -h $SO
+          echo "=== QNN/HTP symbols ==="
+          nm -D $SO 2>/dev/null | grep -iE "qnn|Qnn|HTP|Htp" | head -20 || echo "no qnn symbols"
+          echo "=== Providers ==="
+          strings $SO 2>/dev/null | grep -iE "ExecutionProvider" | sort -u | head
+
+      - name: Upload libonnxruntime.so with QNN EP
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-qnn-android
+          path: |
+            onnxruntime/build/Android/MinSizeRel/libonnxruntime.so
+            onnxruntime/build/Android/MinSizeRel/libonnxruntime4j_jni.so
+          if-no-files-found: error
