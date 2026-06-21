@@ -114,7 +114,6 @@ jobs:
           cd onnxruntime
           export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache CCACHE_CPP2=yes
           ./build.sh \
-            --build_shared_lib \
             --android \
             --config MinSizeRel \
             --parallel 4 \
@@ -138,6 +137,7 @@ jobs:
         if: success()
         run: |
           SO=onnxruntime/build/Android/MinSizeRel/libonnxruntime.so
+          ls -la $SO 2>/dev/null || SO=onnxruntime/build/Android/MinSizeRel/libonnxruntime.a
           ls -la $SO
           echo "=== Size ==="
           du -h $SO
@@ -146,11 +146,12 @@ jobs:
           echo "=== Providers ==="
           strings $SO 2>/dev/null | grep -iE "ExecutionProvider" | sort -u | head
 
-      - name: Upload libonnxruntime.so with QNN EP
+      - name: Upload libonnxruntime with QNN EP
         uses: actions/upload-artifact@v4
         with:
           name: onnxruntime-qnn-android
           path: |
             onnxruntime/build/Android/MinSizeRel/libonnxruntime.so
+            onnxruntime/build/Android/MinSizeRel/libonnxruntime.a
             onnxruntime/build/Android/MinSizeRel/libonnxruntime4j_jni.so
           if-no-files-found: error
