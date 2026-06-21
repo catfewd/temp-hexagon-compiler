@@ -36,9 +36,13 @@ jobs:
         if: steps.cache-qnn.outputs.cache-hit != 'true'
         run: |
           mkdir -p /opt/qnn-sdk
-          curl -sL -o /tmp/qnn-sdk.tar.gz \
-            "https://github.com/catfewd/temp-hexagon-compiler/releases/download/qnn-sdk-2.46.0.260424/qnn-sdk-2.46.0.260424-min-aarch64.tar.gz"
-          tar xzf /tmp/qnn-sdk.tar.gz -C /opt/qnn-sdk
+          gh release download qnn-sdk-2.46.0.260424 \
+            --repo catfewd/temp-hexagon-compiler \
+            --pattern "qnn-sdk-2.46.0.260424-*.tar.gz" \
+            --dir /tmp \
+            --clobber
+          ls /tmp/qnn-sdk-*.tar.gz
+          tar xzf /tmp/qnn-sdk-*.tar.gz -C /opt/qnn-sdk
           cp -r /opt/qnn-sdk/qnn-sdk-min/* /opt/qnn-sdk/
           rm -rf /opt/qnn-sdk/qnn-sdk-min
           echo "=== Verifying ==="
