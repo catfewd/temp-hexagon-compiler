@@ -114,10 +114,11 @@ jobs:
           cd onnxruntime
           export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache CCACHE_CPP2=yes
           ./build.sh \
+            --build_shared_lib \
             --android \
             --config MinSizeRel \
             --parallel 4 \
-            --use_qnn \
+            --use_qnn static_lib \
             --qnn_home ${{ env.QNN_HOME }} \
             --android_ndk_path ${{ env.ANDROID_NDK_HOME }} \
             --android_sdk_path ${{ env.ANDROID_SDK_ROOT }} \
