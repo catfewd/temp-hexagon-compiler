@@ -1,4 +1,4 @@
-name: Build ORT with QNN EP for Android (HTP v75)
+name: Build ORT with QNN EP + JNI for Android (HTP v75)
 
 on:
   workflow_dispatch:
@@ -24,6 +24,12 @@ jobs:
           submodules: recursive
           path: onnxruntime
           fetch-depth: 1
+
+      - name: Install Java and Maven (for JNI build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y maven default-jdk
+          echo "JAVA_HOME=/usr/lib/jvm/default-java" >> $GITHUB_ENV
 
       - name: Cache QNN SDK
         id: cache-qnn
@@ -103,22 +109,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-qnn
+          key: ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-qnn-jni
           restore-keys: |
             ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-
             ccache-${{ runner.os }}-
 
-      - name: Build ORT for Android with QNN EP
+      - name: Build ORT for Android with QNN EP and Java
         timeout-minutes: 300
         run: |
           cd onnxruntime
           export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache CCACHE_CPP2=yes
           ./build.sh \
             --build_shared_lib \
+            --build_java \
             --android \
             --config MinSizeRel \
             --parallel 4 \
             --use_qnn static_lib \
+            --use_xnnpack \
             --qnn_home ${{ env.QNN_HOME }} \
             --android_ndk_path ${{ env.ANDROID_NDK_HOME }} \
             --android_sdk_path ${{ env.ANDROID_SDK_ROOT }} \
@@ -147,10 +155,10 @@ jobs:
           echo "=== Providers ==="
           strings $SO 2>/dev/null | grep -iE "ExecutionProvider" | sort -u | head
 
-      - name: Upload libonnxruntime with QNN EP
+      - name: Upload libonnxruntime with QNN EP and JNI
         uses: actions/upload-artifact@v4
         with:
-          name: onnxruntime-qnn-android
+          name: onnxruntime-qnn-android-jni
           path: |
             onnxruntime/build/Android/MinSizeRel/libonnxruntime.so
             onnxruntime/build/Android/MinSizeRel/libonnxruntime.a
