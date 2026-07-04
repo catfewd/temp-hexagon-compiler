@@ -80,12 +80,15 @@ jobs:
           if [ -d "$SDK/platforms/android-27" ]; then
             echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
           else
-            mkdir -p $HOME/android-sdk
+            mkdir -p $HOME/android-sdk/cmdline-tools
             cd $HOME/android-sdk
             curl -sL -o tools.zip \
               "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
             unzip -q tools.zip
-            yes 2>/dev/null | ./cmdline-tools/bin/sdkmanager "platforms;android-27" > /dev/null || true
+            # Move tools to the expected 'latest' directory
+            mv cmdline-tools latest
+            # Now run sdkmanager with the SDK root
+            yes 2>/dev/null | ./latest/bin/sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-27" > /dev/null || true
             echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
             cd -
           fi
@@ -113,6 +116,12 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-
             ccache-${{ runner.os }}-
+
+      - name: Install compatible CMake
+        run: |
+          sudo apt-get remove -y cmake
+          pip install cmake==3.28.6
+          cmake --version
 
       - name: Build ORT for Android with QNN EP and Java
         timeout-minutes: 300
