@@ -1,3 +1,5 @@
+name: omni Build ORT with QNN EP + JNI for Android (HTP v75)
+
 on:
   workflow_dispatch:
   push:
