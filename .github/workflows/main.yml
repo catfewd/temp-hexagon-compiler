@@ -114,12 +114,6 @@ jobs:
             ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-
             ccache-${{ runner.os }}-
 
-      - name: Patch CMake Native Test Copy Bug
-        run: |
-          # Finds references generating the faulty copy statement and patches a local destination path
-          find onnxruntime/ -type f \( -name "*.cmake" -o -name "CMakeLists.txt" \) -exec sed -i 's/COMMAND ${CMAKE_COMMAND} -E copy_directory.*native-test/& ${CMAKE_CURRENT_BINARY_DIR}\/java_test_output/g' {} + || true
-          find onnxruntime/ -type f \( -name "*.cmake" -o -name "CMakeLists.txt" \) -exec sed -i 's/COMMAND ${CMAKE_COMMAND} -E copy.*native-test/& ${CMAKE_CURRENT_BINARY_DIR}\/java_test_output/g' {} + || true
-
       - name: Build ORT for Android with QNN EP and Java
         timeout-minutes: 300
         run: |
@@ -141,7 +135,8 @@ jobs:
             --cmake_generator Ninja \
             --build_dir build/Android \
             --skip_tests \
-            --update --build
+            --update --build \
+            --cmake_extra_defines "java_native_test_dir=${{ github.workspace }}/onnxruntime/build/Android/MinSizeRel/java_test_out"
 
       - name: List build artifacts
         run: |
