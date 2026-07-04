@@ -1,4 +1,4 @@
-name: omni Build ORT with QNN EP + JNI for Android (HTP v75)
+name: Build ORT with QNN EP + JNI for Android (HTP v75)
 
 on:
   workflow_dispatch:
@@ -30,6 +30,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y maven default-jdk
           echo "JAVA_HOME=/usr/lib/jvm/default-java" >> $GITHUB_ENV
+
+      - name: Patch Java CMakeLists to fix native-test copy error
+        run: |
+          # With --skip_tests, the Java test output dir is empty, causing a 
+          # 'cmake -E copy native-test' command to miss its destination argument.
+          # We remove the copy command since we only need the JNI library.
+          sed -i '/native-test/d' onnxruntime/java/CMakeLists.txt
 
       - name: Cache QNN SDK
         id: cache-qnn
@@ -80,15 +87,12 @@ jobs:
           if [ -d "$SDK/platforms/android-27" ]; then
             echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
           else
-            mkdir -p $HOME/android-sdk/cmdline-tools
+            mkdir -p $HOME/android-sdk
             cd $HOME/android-sdk
             curl -sL -o tools.zip \
               "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
             unzip -q tools.zip
-            # Move tools to the expected 'latest' directory
-            mv cmdline-tools latest
-            # Now run sdkmanager with the SDK root
-            yes 2>/dev/null | ./latest/bin/sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-27" > /dev/null || true
+            yes 2>/dev/null | ./cmdline-tools/bin/sdkmanager "platforms;android-27" > /dev/null || true
             echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
             cd -
           fi
@@ -117,16 +121,11 @@ jobs:
             ccache-${{ runner.os }}-${{ env.ORT_COMMIT }}-
             ccache-${{ runner.os }}-
 
-      - name: Install compatible CMake
-        run: |
-          sudo apt-get remove -y cmake
-          pip install cmake==3.28.6
-          cmake --version
-
       - name: Build ORT for Android with QNN EP and Java
         timeout-minutes: 300
         run: |
           cd onnxruntime
+          export JAVA_HOME=/usr/lib/jvm/default-java
           export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache CCACHE_CPP2=yes
           ./build.sh \
             --build_shared_lib \
